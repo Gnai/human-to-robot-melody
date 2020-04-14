@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+  <meta charset="utf-8">
+  <title>OSC Communication</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- <script src="magenta.js"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@^1.0.0"></script>
+  <script>
+    // Initialize the model.
+    music_vae = new mm.MusicVAE('https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/mel_4bar_small_q2');
+    music_vae.initialize();
+
+    // Create a player to play the sampled sequence.
+    vaePlayer = new mm.Player();
+
+    TWINKLE_TWINKLE = {
+      notes: [
+        {pitch: 60, startTime: 0.0, endTime: 0.5},
+        {pitch: 60, startTime: 0.5, endTime: 1.0},
+        {pitch: 67, startTime: 1.0, endTime: 1.5},
+        {pitch: 67, startTime: 1.5, endTime: 2.0},
+        {pitch: 69, startTime: 2.0, endTime: 2.5},
+        {pitch: 69, startTime: 2.5, endTime: 3.0},
+        {pitch: 67, startTime: 3.0, endTime: 4.0},
+        {pitch: 65, startTime: 4.0, endTime: 4.5},
+        {pitch: 65, startTime: 4.5, endTime: 5.0},
+        {pitch: 64, startTime: 5.0, endTime: 5.5},
+        {pitch: 64, startTime: 5.5, endTime: 6.0},
+        {pitch: 62, startTime: 6.0, endTime: 6.5},
+        {pitch: 62, startTime: 6.5, endTime: 7.0},
+        {pitch: 60, startTime: 7.0, endTime: 8.0},  
+      ],
+      totalTime: 8
+    };
+
+    ROBOT_PHRASE = {
+      notes:[],
+      totalTime: 8
+    };
+
+    var actualNote, previousNote, countNotes = 0;
+    var recordingRobot = false;
+    var baseTimesNotes = 8;
+    var baseNoteDuration = 0.5;
+    var maxTimesNote = 12;
+
+  </script>
+</head>
+
+
+<body>
+  <h2>OSC Communication between Arduino and Browser</h2>
+  
+  <h2>Controls</h2>
+  <div>
+    <button type="button" id="recordRobot" value="recordRobot" onclick="recordRobot()" style="background-color:red;">Record Robot</button>
+    <button type="button" id="playRobot" value="playRobot" onclick="playRobot()" style="background-color:green;">Play Robot</button>
+    <button type="button" id="playTwinkle" value="playTwinkle" onclick="playTwinkle()" style="background-color:green;">Play Twinkle</button>
+    <button type="button" id="playInterpolation" value="playInterpolation" onclick="playInterpolation(TWINKLE_TWINKLE, ROBOT_PHRASE)" style="background-color:green;">Play Interpolation</button>
+  </div>
+
+  <h2>Message From Robot</h2>
+  <span id="output"></span>
+
+
+  <script>
+    var socket = io.connect();
+
+    socket.on('osc', function (data) {
+      document.getElementById("output").innerHTML = data.x;
+
+      if (!previousNote) previousNote = data.x;
+
+      if(recordingRobot){
+        if(data.x != 0 ){
+          actualNote = data.x;
+          countNotes ++;
+          if (actualNote != previousNote || countNotes >= maxTimesNote){
+            newNote(ROBOT_PHRASE, previousNote, countNotes);
+            countNotes ==0;
+            previousNote = actualNote;
+          }
+          previousNote = actualNote;
+        }
+      }
+
+
+      if (data.x == 1) {
+        document.getElementById("output").innerHTML = "LED ON";
+      }
+      if (data.x == 2) {
+        document.getElementById("output").innerHTML = "LED OFF";
+      }
+    });
+
+
+    function recordRobot(){
+      console.log("rec");
+        document.getElementById("recordRobot").style.backgroundColor = "red"; 
+      if (recordingRobot == false){
+        ROBOT_PHRASE.notes = [];
+        document.getElementById("recordRobot").style.backgroundColor = "grey"; 
+      }
+      recordingRobot = !recordingRobot;
+    }
+
+
+    function newNote(phrase, note, countNotes){
+      console.log("newNote");
+      startt = ROBOT_PHRASE.notes.length > 0 ?  ROBOT_PHRASE.notes[ROBOT_PHRASE.notes.length-1].endTime : 0;
+      duration = countNotes / baseTimesNotes * baseNoteDuration;
+      timeEnd = startt+duration < 8 ? startt+duration : 8;
+      console.log(countNotes);
+      console.log(note);
+      console.log(note+20);
+      console.log(startt);
+      console.log(timeEnd);
+      ROBOT_PHRASE.notes.push({pitch: note+20, startTime: startt, endTime: timeEnd});
+      if (timeEnd >= 8){
+        recordRobot();
+      }
+    }
+
+    function playTwinkle() {
+      if (vaePlayer.isPlaying()) {
+        vaePlayer.stop();
+      }
+      vaePlayer.start(TWINKLE_TWINKLE);
+    }
+
+    function playRobot(){
+      if (vaePlayer.isPlaying()) {
+        vaePlayer.stop();
+      }
+      vaePlayer.start(ROBOT_PHRASE);
+    }
+
+    function playInterpolation(ph1, ph2) {
+      if (vaePlayer.isPlaying()) {
+        vaePlayer.stop();
+        return;
+      }
+      // Music VAE requires quantized melodies, so quantize them first.
+      const star = mm.sequences.quantizeNoteSequence(ph1, 4);
+      const robot = mm.sequences.quantizeNoteSequence(ph2, 4);
+      music_vae
+      .interpolate([star, robot], 4)
+      .then((sample) => {
+        const concatenated = mm.sequences.concatenate(sample);
+        vaePlayer.start(concatenated);
+      });
+    }
+  </script>
+</body>
+
+
+</html>
